@@ -209,3 +209,6 @@ __marimo__/
 python/images/
 python/models/
 C/TFLM/main/models/
+
+/.idea/
+/models/
