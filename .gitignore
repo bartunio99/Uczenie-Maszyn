@@ -206,4 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-.images/
+python/images/
+python/models/
+C/TFLM/main/models/
