@@ -9,14 +9,15 @@ import os
 import numpy as np
 
 
-model = models.mobilenet_v2(weights=None, width_mult=0.35)
-sample_inputs = (torch.randn(1, 3, 224, 224),)
+
+model = models.mobilenet_v2(weights=None, width_mult=0.35).eval()
+sample_inputs = (torch.randn(1, 3, 192, 192),)
 torch_output = model(*sample_inputs)
 
 def main():
-    pruning_l1_unstruct(model)
-    checkSparsity(model)
-    removeMasks(model)
+    # pruning_l2_struct(model)
+    # checkSparsity(model)
+    # removeMasks(model)
     torch.save(model, "models/pt/resnet18.pt")
 
     exportModel(model)
@@ -28,7 +29,7 @@ def pruning_random_unstruct(model):
             prune.random_unstructured(
                 module,
                 name="weight",
-                amount=0.3
+                amount=0.5
             )
 
 def pruning_random_struct(model):
@@ -37,7 +38,7 @@ def pruning_random_struct(model):
             prune.random_structured(
                 module,
                 name="weight",
-                amount=0.3,
+                amount=0.5,
                 dim=0
             )
 
@@ -48,7 +49,7 @@ def pruning_l1_unstruct(model):
             prune.l1_unstructured(
                 module,
                 name="weight",
-                amount=0.3
+                amount=0.5
             )
 
 def pruning_l1_struct(model):
@@ -57,7 +58,7 @@ def pruning_l1_struct(model):
             prune.ln_structured(
                 module,
                 name="weight",
-                amount=0.3,
+                amount=0.5,
                 n=1,
                 dim=0
             )
@@ -68,7 +69,7 @@ def pruning_l2_struct(model):
             prune.ln_structured(
                 module,
                 name="weight",
-                amount=0.3,
+                amount=0.5,
                 n=2,
                 dim=0
             )
@@ -92,7 +93,7 @@ def removeMasks(model):
             prune.remove(module, "weight")
 
 def exportModel(model):
-    dummy_input = torch.randn(1, 3, 224, 224)
+    dummy_input = torch.randn(1, 3, 192, 192)
     torch.onnx.export(
         model,
         dummy_input,
@@ -130,7 +131,7 @@ def exportModel(model):
     def representative_dataset():
         for i in range(10):
             print(f"Processing representative sample {i+1}/10")
-            yield [tf.random.normal([1, 3, 224, 224], dtype=tf.float32)]
+            yield [tf.random.normal([1, 3, 192, 192], dtype=tf.float32)]
             
 
     converter.representative_dataset = representative_dataset
