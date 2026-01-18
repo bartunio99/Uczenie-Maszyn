@@ -21,7 +21,7 @@ def evaluate(img):
     labels = weights.meta["categories"]
     id = predicted_class.item()
 
-    return(labels[id])
+    return(labels[id], id)
 
 
 #normalizacja obrazu

@@ -212,4 +212,14 @@ C/TFLM/main/models/
 
 /.idea/
 /models/
-python/imagenet-sample-images/
+python/pruning/imagenet-sample-images/
+python/data/
+python/results/
+benchmark/managed_components/
+benchmark/models/
+benchmark/dependencies.lock
+benchmark/sdkconfig
+benchmark/sdkconfig.old
+results/
+
+
