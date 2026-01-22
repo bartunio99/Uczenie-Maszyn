@@ -9,6 +9,7 @@ from torchvision import models
 from torchinfo import summary
 import torch
 from ptflops import get_model_complexity_info
+from quantization import quant_model
 
 
 IMG_DIR = "./imagenet-sample-images"
@@ -27,7 +28,7 @@ def measureFlops(model):
     return flops
 
 #sprawdza rozmiar modelu po pruningu
-def checkModelSize(model, device):
+def checkModelSize(model, device,dtype=torch.float32):
     info = summary(
         model,
         input_size=(1,3,224,224),
@@ -35,57 +36,44 @@ def checkModelSize(model, device):
         verbose=0
     )
 
+    # print(info.input_size, info.total_output_bytes, info.total_param_bytes)
 
-    input_MB = toBytes(info.input_size) / 1024**2
-    forward_MB = toBytes(info.total_output_bytes) / 1024**2
-    params_MB = toBytes(info.total_param_bytes) / 1024**2
+    # uwzględnij typ danych (4 bajty dla float32)
+    bytes_per_elem = torch.tensor([], dtype=dtype).element_size()
+    
+    # Input size
+    input_MB = (torch.prod(torch.tensor(info.input_size)) * bytes_per_elem).item() / 1024**2
+
+    # Forward pass (tylko forward w eval, ok. połowa total_output_bytes)
+    forward_MB = (info.total_output_bytes / 2) / 1024**2
+
+    # Parametry
+    params_MB = info.total_param_bytes / 1024**2
+
     total_MB = input_MB + forward_MB + params_MB
 
-    memory_data = {
-        "Metric": [
-            "Input size (MB)",
-            "Forward pass size (MB)",
-            "Params size (MB)",
-            "Estimated Total Size (MB)"
-        ],
-        "Value_MB": [
-            input_MB,
-            forward_MB,
-            params_MB,
-            total_MB
-        ]
-    }
+    size = model_size(model)
+    params = count_quant_params(model)
+    info = str(info)
+    info = info.replace("=","") 
+    return [size, params]
 
-    return total_MB
-def toBytes(x, dtype_bytes=4):
-    """
-    Zamienia torchinfo input_size / output_size / param_bytes na bajty.
-    Obsługuje tuple, listy i zagnieżdżenia.
-    dtype_bytes = 4 dla float32
-    """
-    # jeśli to int, zwróć bez zmian
-    if isinstance(x, int):
-        return x
-    # jeśli to float, zwróć jako int (rzadko)
-    if isinstance(x, float):
-        return int(x)
-    
-    # jeśli lista / tuple
-    if isinstance(x, (list, tuple)):
-        total = 0
-        for elem in x:
-            # jeśli element jest liczbą, pomnóż przez dtype_bytes
-            if isinstance(elem, int):
-                total += elem * dtype_bytes
-            # jeśli element jest kolejnym tuple/listą -> rekurencja
-            elif isinstance(elem, (list, tuple)):
-                total += toBytes(elem, dtype_bytes=dtype_bytes)
-            else:
-                raise TypeError(f"Nieobsługiwany typ: {type(elem)} w {elem}")
-        return total
-    
-    raise TypeError(f"Nieobsługiwany typ: {type(x)}")
+#dla zkwantyzownych modeli
+def model_size(model):
+    size = 0
+    for p in model.parameters():
+        size += p.numel()*p.element_size()
+    return size
 
+def count_quant_params(model):
+    total = 0
+    for m in model.modules():
+        if hasattr(m, 'weight') and m.weight is not None:
+            w = m.weight
+            if callable(w):   # jeśli jest funkcją, wywołaj ją
+                w = w()
+            total += w.numel()    
+    return total
 
 #mierzy poprawnosc rozpoznawania obrazow modelu, czas i zuzycie pamieci
 def measureInference(model, imgDir, sampleSize, device):
@@ -131,21 +119,21 @@ def exportToCSV(name, cutoff, size, results, flops):
 
     os.makedirs(folder, exist_ok=True)
 
-    fileName = name + ".csv"
+    fileName = name + "_quantified.csv"
 
     file = os.path.join(folder, fileName)
     
     with open(file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
 
-        writer.writerow(["poziom uciecia", "rozmiar [MB]", "dokladnosc [%]", "dokladnosc top5 [%]", "sredni czas inferencji [ms]", "moc obliczeniowa [MFLOPS]"])
+        writer.writerow(["poziom uciecia","dokladnosc [%]", "dokladnosc top5 [%]", "sredni czas inferencji [ms]", "moc obliczeniowa [MFLOPS]", "Rozmiar [MB]", "l. parametrow"])
 
         for i in range(len(size)):
-            writer.writerow([cutoff[i], size[i], results[i][0], results[i][1], results[i][2], flops[i]])
+            writer.writerow([cutoff[i], results[i][0], results[i][1], results[i][2], flops[i], size[i][0], size[i][1]])
 
 
-def main():
-    cutoff = [1, 2, 5, 10, 20, 50, 100]
+def main(): 
+    cutoff = [1,2,5,10,20,40,50,80,100]
     for num in modes:       #dla kazdej wersji pruningu
         print(f"test nr {num}")
         avgSize = []
@@ -163,24 +151,25 @@ def main():
             model, name = m.getPruning(num, model, amount)
             if num != 5:
                 model = m.removeMasks(model)
+            model = quant_model(IMG_DIR, model)
 
             #sparsity = m.checkSparsity(model)
 
             for j in range(10):  #10 powtorzen pomiarow
                 #pruning:
-                size.append(checkModelSize(model, device))
-                results.append (measureInference(model, IMG_DIR, SAMPLE_SIZE, device))
+                size = (checkModelSize(model, device))
+                results.append(measureInference(model, IMG_DIR, SAMPLE_SIZE, device))
                 flops.append(measureFlops(model))
             
 
-            avgSize.append(sum(size)/len(size))
+            avgSize.append(size)
             avgResults.append([sum(results[0])/len(results[0]),sum(results[1])/len(results[1]),sum(results[2])/len(results[2])])
             avgFlops.append(sum(flops)/len(flops))
         exportToCSV(name, cutoff, avgSize, avgResults, avgFlops)
+        summary(model, input_size=(1,3,224,224))
             
 
 if __name__ == '__main__':
     main()
-
 
             
